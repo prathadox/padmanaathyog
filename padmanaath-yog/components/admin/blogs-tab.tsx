@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Search, Edit, Trash2, ExternalLink, Calendar, User } from "lucide-react"
-import { formatDate } from "@/lib/utils"
+import { formatDate, resolveExternalBlogUrl } from "@/lib/utils"
 import type { BlogExternalRef } from "@/lib/services/blog-service"
 
 interface BlogsTabProps {
@@ -79,7 +79,9 @@ export default function BlogsTab({
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredBlogs.map((blog) => (
+          {filteredBlogs.map((blog) => {
+            const externalUrl = resolveExternalBlogUrl(blog.external_id, blog.provider, blog.author)
+            return (
             <Card
               key={blog.id}
               className={`group hover:shadow-lg transition-all duration-200 ${
@@ -130,7 +132,7 @@ export default function BlogsTab({
                 {/* Metadata */}
                 <div className="flex items-center justify-between text-xs text-gray-500">
                   <span>Slug: {blog.slug}</span>
-                  {blog.external_id.startsWith('http') && (
+                  {externalUrl && (
                     <ExternalLink className="h-3 w-3" />
                   )}
                 </div>
@@ -158,12 +160,12 @@ export default function BlogsTab({
                 </div>
 
                 {/* External Link Button */}
-                {blog.external_id.startsWith('http') && (
+                {externalUrl && (
                   <Button
                     variant="ghost"
                     size="sm"
                     className="w-full text-yoga-burnt hover:bg-yoga-lightgreen"
-                    onClick={() => window.open(blog.external_id, '_blank')}
+                    onClick={() => window.open(externalUrl, '_blank', 'noopener,noreferrer')}
                   >
                     <ExternalLink className="h-3 w-3 mr-1" />
                     View Original
@@ -171,7 +173,7 @@ export default function BlogsTab({
                 )}
               </CardContent>
             </Card>
-          ))}
+          )})}
         </div>
       )}
 

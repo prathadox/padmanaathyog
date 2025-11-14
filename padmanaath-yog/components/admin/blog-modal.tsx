@@ -10,6 +10,45 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "@/hooks/use-toast"
 import { BlogService, type BlogExternalRef } from "@/lib/services/blog-service"
 
+const PROVIDER_DEFINITIONS = [
+  { value: "medium", label: "Medium", hosts: ["medium.com"] },
+  { value: "dev.to", label: "Dev.to", hosts: ["dev.to"] },
+  { value: "hashnode", label: "Hashnode", hosts: ["hashnode.dev", "hashnode.com"] },
+  { value: "wordpress", label: "WordPress", hosts: ["wordpress.com", "wp.com"] },
+  { value: "substack", label: "Substack", hosts: ["substack.com"] },
+  { value: "blogger", label: "Blogger", hosts: ["blogspot.com"] },
+  { value: "ghost", label: "Ghost", hosts: ["ghost.io"] },
+  { value: "notion", label: "Notion", hosts: ["notion.site", "notion.so"] },
+]
+
+const PROVIDER_OPTIONS = [
+  { value: "external", label: "External / Custom" },
+  ...PROVIDER_DEFINITIONS.map(({ value, label }) => ({ value, label })),
+]
+
+const normalizeUrlInput = (value: string) => {
+  if (!value) return ""
+  const trimmed = value.trim()
+  if (!trimmed) return ""
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed
+  }
+  return `https://${trimmed.replace(/^https?:\/\//i, "")}`
+}
+
+const shouldNormalizeToUrl = (value: string) => {
+  if (!value) return false
+  return /^https?:\/\//i.test(value) || value.includes(".")
+}
+
+const detectProviderFromHost = (hostname: string) => {
+  const normalized = hostname.toLowerCase()
+  const match = PROVIDER_DEFINITIONS.find(({ hosts }) =>
+    hosts.some((host) => normalized.includes(host))
+  )
+  return match?.value ?? "external"
+}
+
 interface BlogModalProps {
   isOpen: boolean
   onClose: () => void
@@ -78,93 +117,85 @@ export default function BlogModal({ isOpen, onClose, blog, onSuccess }: BlogModa
     }))
   }
 
-  const extractDataFromUrl = async (url: string) => {
-    if (!url.trim()) return
+  const extractDataFromUrl = async (inputUrl: string) => {
+    const normalizedUrl = normalizeUrlInput(inputUrl)
+    if (!normalizedUrl) return
 
     try {
-      const urlObj = new URL(url)
-      const hostname = urlObj.hostname.toLowerCase()
-      
-      // Extract provider from URL
-      let provider = "external"
-      if (hostname.includes("medium.com")) {
-        provider = "medium"
-      } else if (hostname.includes("dev.to")) {
-        provider = "dev.to"
-      } else if (hostname.includes("hashnode")) {
-        provider = "hashnode"
-      } else if (hostname.includes("wordpress")) {
-        provider = "wordpress"
-      }
+      const parsedUrl = new URL(normalizedUrl)
+      const provider = detectProviderFromHost(parsedUrl.hostname)
 
-      // Use the full URL as external_id so it can be opened directly
-      const external_id = url
-
-      // First, set the basic extracted data
       setFormData(prev => ({
         ...prev,
-        external_id,
-        provider
+        external_id: normalizedUrl,
+        provider,
       }))
 
-      // If it's a valid HTTP URL, try to fetch metadata
-      if (url.startsWith('http://') || url.startsWith('https://')) {
-        setIsFetchingMetadata(true)
-        
-        try {
-          const response = await fetch('/api/extract-blog-metadata', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ url }),
+      setIsFetchingMetadata(true)
+
+      try {
+        const response = await fetch('/api/extract-blog-metadata', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ url: normalizedUrl }),
+        })
+
+        if (response.ok) {
+          const metadata = await response.json()
+
+          setFormData(prev => ({
+            ...prev,
+            external_id: normalizedUrl,
+            provider,
+            title: metadata.title || prev.title,
+            excerpt: metadata.excerpt || prev.excerpt,
+            image: metadata.image || prev.image,
+            author: metadata.author || prev.author,
+            date: metadata.date || prev.date,
+            tags: metadata.tags?.join(', ') || prev.tags,
+            slug: prev.slug || generateSlug(metadata.title || '')
+          }))
+
+          toast({
+            title: "Success",
+            description: "Blog metadata extracted successfully!",
           })
-
-          if (response.ok) {
-            const metadata = await response.json()
-            
-            setFormData(prev => ({
-              ...prev,
-              external_id: url, // Keep full URL
-              provider,
-              title: metadata.title || prev.title,
-              excerpt: metadata.excerpt || prev.excerpt,
-              image: metadata.image || prev.image,
-              author: metadata.author || prev.author,
-              date: metadata.date || prev.date,
-              tags: metadata.tags?.join(', ') || prev.tags,
-              slug: prev.slug || generateSlug(metadata.title || '')
-            }))
-
-            toast({
-              title: "Success",
-              description: "Blog metadata extracted successfully!",
-            })
-          } else {
-            console.error('Failed to fetch metadata')
-            toast({
-              title: "Partial Success",
-              description: "Provider detected, but couldn't auto-fill all fields. Please fill manually.",
-            })
-          }
-        } catch (error) {
-          console.error('Error fetching metadata:', error)
+        } else {
+          console.error('Failed to fetch metadata')
           toast({
             title: "Partial Success",
             description: "Provider detected, but couldn't auto-fill all fields. Please fill manually.",
           })
-        } finally {
-          setIsFetchingMetadata(false)
         }
+      } catch (error) {
+        console.error('Error fetching metadata:', error)
+        toast({
+          title: "Partial Success",
+          description: "Provider detected, but couldn't auto-fill all fields. Please fill manually.",
+        })
+      } finally {
+        setIsFetchingMetadata(false)
       }
     } catch (error) {
-      // Invalid URL, just use as external_id
+      console.error("Invalid blog URL provided:", error)
       setFormData(prev => ({
         ...prev,
-        external_id: url,
+        external_id: normalizedUrl,
         provider: "external"
       }))
+      toast({
+        title: "Invalid URL",
+        description: "We couldn't parse this URL. Please double-check and try again.",
+        variant: "destructive",
+      })
     }
+  }
+
+  const handleExtractClick = () => {
+    if (!formData.external_id || isFetchingMetadata) return
+    extractDataFromUrl(formData.external_id)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -186,8 +217,14 @@ export default function BlogModal({ isOpen, onClose, blog, onSuccess }: BlogModa
     setIsLoading(true)
 
     try {
+      const resolvedExternalId = formData.external_id?.trim()
+        ? (shouldNormalizeToUrl(formData.external_id.trim())
+            ? normalizeUrlInput(formData.external_id)
+            : formData.external_id.trim())
+        : (formData.slug.trim() || generateSlug(formData.title))
+
       const blogData = {
-        external_id: formData.external_id || formData.slug,
+        external_id: resolvedExternalId,
         title: formData.title.trim(),
         excerpt: formData.excerpt.trim(),
         image: formData.image.trim() || "/heroSection.png",
@@ -249,12 +286,15 @@ export default function BlogModal({ isOpen, onClose, blog, onSuccess }: BlogModa
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => extractDataFromUrl(formData.external_id)}
-                  disabled={isFetchingMetadata || !formData.external_id}
+                  onClick={handleExtractClick}
+                  disabled={isFetchingMetadata || !formData.external_id?.trim()}
                 >
                   {isFetchingMetadata ? "Extracting..." : "Extract"}
                 </Button>
               </div>
+              <p className="text-xs text-gray-500">
+                Supports Medium, Dev.to, Hashnode, WordPress, Substack, Blogger, Ghost, Notion, or any public link.
+              </p>
               {isFetchingMetadata && (
                 <p className="text-sm text-gray-500 flex items-center gap-2">
                   <span className="animate-spin">⏳</span> Fetching blog metadata...
@@ -270,11 +310,11 @@ export default function BlogModal({ isOpen, onClose, blog, onSuccess }: BlogModa
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="external">External</SelectItem>
-                <SelectItem value="medium">Medium</SelectItem>
-                <SelectItem value="dev.to">Dev.to</SelectItem>
-                <SelectItem value="hashnode">Hashnode</SelectItem>
-                <SelectItem value="wordpress">WordPress</SelectItem>
+                {PROVIDER_OPTIONS.map(option => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

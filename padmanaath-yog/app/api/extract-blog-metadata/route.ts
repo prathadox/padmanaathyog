@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import * as cheerio from "cheerio"
 
+export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
+
 export async function POST(request: NextRequest) {
   try {
     const { url } = await request.json()
@@ -101,14 +104,39 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // For Medium, try to extract author from URL if not found
-    if (!metadata.author && url.includes('medium.com')) {
+    // Filter out platform names that aren't real author names
+    const platformNames = ['substack', 'medium', 'dev.to', 'hashnode', 'wordpress', 'blogger', 'ghost', 'notion']
+    if (metadata.author && platformNames.includes(metadata.author.toLowerCase())) {
+      metadata.author = ""
+    }
+
+    // Extract author from URL if not found in metadata
+    if (!metadata.author) {
       const urlObj = new URL(url)
       const pathParts = urlObj.pathname.split('/').filter(part => part.length > 0)
-      // Medium URLs are usually: medium.com/@username/article or medium.com/publication/@username/article
-      const authorPart = pathParts.find(part => part.startsWith('@'))
-      if (authorPart) {
-        metadata.author = authorPart.substring(1) // Remove @ symbol
+      
+      // Medium URLs: medium.com/@username/article
+      if (url.includes('medium.com')) {
+        const authorPart = pathParts.find(part => part.startsWith('@'))
+        if (authorPart) {
+          metadata.author = authorPart.substring(1) // Remove @ symbol
+        }
+      }
+      
+      // Substack URLs: substack.com/@username/note/... or substack.com/@username/p/...
+      if (url.includes('substack.com')) {
+        const authorPart = pathParts.find(part => part.startsWith('@'))
+        if (authorPart) {
+          metadata.author = authorPart.substring(1) // Remove @ symbol
+        }
+      }
+      
+      // Dev.to URLs: dev.to/username/article
+      if (url.includes('dev.to')) {
+        const authorPart = pathParts[0] // First path segment is usually the username
+        if (authorPart && !authorPart.includes('.')) {
+          metadata.author = authorPart
+        }
       }
     }
 
@@ -121,4 +149,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Failed to extract metadata" }, { status: 500 })
   }
 }
-

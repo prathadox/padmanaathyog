@@ -1,6 +1,6 @@
 import Image from "next/image"
 import Link from "next/link"
-import { formatDate } from "@/lib/utils"
+import { formatDate, resolveExternalBlogUrl } from "@/lib/utils"
 
 interface BlogCardProps {
   id: number
@@ -27,8 +27,10 @@ export default function BlogCard({
   provider = "external",
   external_id 
 }: BlogCardProps) {
-  const isExternalLink = external_id?.startsWith('http')
-  const blogUrl = isExternalLink ? external_id! : `/blog/${slug}`
+  const externalUrl = resolveExternalBlogUrl(external_id, provider, author)
+
+  const blogUrl = externalUrl ?? `/blog/${slug}`
+  const isExternalLink = Boolean(externalUrl)
   return (
     <article className="glass-card group overflow-hidden">
       <div className="relative h-52 w-full">
